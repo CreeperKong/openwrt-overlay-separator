@@ -181,6 +181,11 @@ if [[ $# -gt 0 ]]; then
     done
 fi
 
+# Set default TEMP_FILE if not specified and needed
+if [[ -z "$TEMP_FILE" && "$COMP" != "raw" ]]; then
+    TEMP_FILE="/tmp/openwrt-separator-$$.img"
+fi
+
 # If exactly one file name was provided as positional argument, show usage and exit
 if [[ "$POS_COUNT" -eq 1 ]]; then
     usage
@@ -331,38 +336,18 @@ else
     if [[ "$DECOMP" != "raw" ]]; then
         case "$DECOMP" in
             gzip)
-                gzip -dc "$INPUT_FILE" > "$TEMP_FILE" || { output "Error: Decompression failed"; exit 1; }
+                gzip -dc "$INPUT_FILE" > "$TEMP_FILE" || { output "Warning: Decompression had errors"; }
                 ;;
             xz)
-                xz -dc "$INPUT_FILE" > "$TEMP_FILE" || { output "Error: Decompression failed"; exit 1; }
+                xz -dc "$INPUT_FILE" > "$TEMP_FILE" || { output "Warning: Decompression had errors"; }
                 ;;
             bzip2)
-                bzip2 -dc "$INPUT_FILE" > "$TEMP_FILE" || { output "Error: Decompression failed"; exit 1; }
+                bzip2 -dc "$INPUT_FILE" > "$TEMP_FILE" || { output "Warning: Decompression had errors"; }
                 ;;
             zstd)
-                zstd -dc "$INPUT_FILE" > "$TEMP_FILE" || { output "Error: Decompression failed"; exit 1; }
-                ;;
-            *)
-                "$DECOMP" -dk "$INPUT_FILE" || { output "Error: Decompression failed"; exit 1; }
-                DECOMP_FILE="${INPUT_FILE%.*}"
-                mv "$DECOMP_FILE" "$TEMP_FILE" || { output "Error: Failed to move decompressed file"; exit 1; }
+                zstd -dc "$INPUT_FILE" > "$TEMP_FILE" || { output "Warning: Decompression had errors"; }
                 ;;
         esac
-    else
-        # DECOMP is raw, copy input to temp file
-        if ! cp "$INPUT_FILE" "$TEMP_FILE"; then
-            output "Error: Cannot copy input file to temp file: $TEMP_FILE"
-            exit 1
-        fi
-    fi
-    WORKING_FILE="$TEMP_FILE"
-
-    # 3) decompress the input file into a temporary file
-    if [[ "$DECOMP" != "raw" ]]; then
-        "$DECOMP" -dk "$INPUT_FILE" || { output "Error: Decompression failed"; exit 1; }
-        # Get the decompressed file name (remove compression extension)
-        DECOMP_FILE="${INPUT_FILE%.*}"
-        mv "$DECOMP_FILE" "$TEMP_FILE" || { output "Error: Failed to move decompressed file"; exit 1; }
     else
         # DECOMP is raw, copy input to temp file
         if ! cp "$INPUT_FILE" "$TEMP_FILE"; then
