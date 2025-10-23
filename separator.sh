@@ -39,6 +39,43 @@ output() {
     fi
 }
 
+# Add: size parsing function (recognize K KiB, M MiB, G GiB, case-insensitive)
+size_to_bytes() {
+    local v="$1"
+    if [[ -z "$v" ]]; then
+        echo ""
+        return
+    fi
+    # remove spaces
+    v="${v//[[:space:]]/}"
+    # match number + optional unit
+    if [[ $v =~ ^([0-9]+(\.[0-9]+)?)([A-Za-z]+)?$ ]]; then
+        local num="${BASH_REMATCH[1]}"
+        local unit="${BASH_REMATCH[3]}"
+        unit="${unit,,}"  # lowercase
+        case "$unit" in
+            k|kb|kib)
+                awk "BEGIN{printf \"%0.f\", $num * 1024}"
+                ;;
+            m|mb|mib)
+                awk "BEGIN{printf \"%0.f\", $num * 1024 * 1024}"
+                ;;
+            g|gb|gib)
+                awk "BEGIN{printf \"%0.f\", $num * 1024 * 1024 * 1024}"
+                ;;
+            "" )
+                # plain bytes (integer or decimal)
+                awk "BEGIN{printf \"%0.f\", $num}"
+                ;;
+            *)
+                echo ""
+                ;;
+        esac
+    else
+        echo ""
+    fi
+}
+
 # Interactive prompt function (English)
 interactive_prompt() {
     echo "Welcome to OpenWrt Overlay Separator!"
@@ -50,15 +87,23 @@ interactive_prompt() {
         read -p "Enter output file path: " OUTPUT_FILE
     fi
     if [[ -z "$OVERLAYSIZE" ]]; then
-        read -p "Enter overlay size (e.g. 128MiB): " OVERLAYSIZE
+        # default overlay size 128MiB if user presses Enter
+        read -p "Enter overlay size (e.g. 128MiB) [128MiB]: " _tmp
+        OVERLAYSIZE=${_tmp:-128MiB}
     fi
     if [[ -z "$ROMSIZE" ]]; then
-        read -p "Enter ROM size (optional, press Enter to auto): " ROMSIZE
+        # empty means auto
+        read -p "Enter ROM size (optional, press Enter to auto) [auto]: " _tmp
+        if [[ -n "$_tmp" ]]; then
+            ROMSIZE="$_tmp"
+        else
+            ROMSIZE=""
+        fi
     fi
     # Only ask for overlay fs if not provided
     if [[ -z "$OVERLAY_FS" ]]; then
-        read -p "Choose overlay filesystem (ext4/f2fs, default: ext4): " OVERLAY_FS
-        OVERLAY_FS=${OVERLAY_FS:-ext4}
+        read -p "Choose overlay filesystem (ext4/f2fs) [ext4]: " _tmp
+        OVERLAY_FS=${_tmp:-ext4}
     fi
     if [[ "$OVERLAY_FS" != "ext4" && "$OVERLAY_FS" != "f2fs" ]]; then
         echo "Error: Overlay filesystem must be either ext4 or f2fs"
@@ -66,8 +111,9 @@ interactive_prompt() {
     fi
     # Ask about KEEP_TEMP only if it wasn't enabled via params
     if [[ "$KEEP_TEMP" != true ]]; then
-        read -p "Keep temporary files? (y/N): " KEEP_TEMP_ANSWER
-        [[ "$KEEP_TEMP_ANSWER" =~ ^[Yy]$ ]] && KEEP_TEMP=true
+        read -p "Keep temporary files? (y/N) [N]: " _tmp
+        _tmp=${_tmp:-N}
+        [[ "$_tmp" =~ ^[Yy]$ ]] && KEEP_TEMP=true
     fi
     # Do not prompt about silent mode here (non-interactive is -s and should prevent prompts)
 }
@@ -268,7 +314,7 @@ else
         exit 1
     fi
 
-# 3) decompress the input file into a temporary file
+    # 3) decompress the input file into a temporary file
     if [[ "$DECOMP" != "raw" ]]; then
         "$DECOMP" -dk "$INPUT_FILE" || { output "Error: Decompression failed"; exit 1; }
         # Get the decompressed file name (remove compression extension)
@@ -330,7 +376,8 @@ fi
 FS_SIZE="$(sudo unsquashfs -s "$PARTITION" | grep -o 'Filesystem size [0-9]* bytes' | grep -o '[0-9][0-9]*')"
 # if ROMSIZE is not specified, set it to FS_SIZE rounded up to nearest 8MiB unit. if ROMSIZE is specified and less than FS_SIZE. error out
 if [[ -z "$ROMSIZE" ]]; then
-    ROMSIZE=$(( (FS_SIZE + 8*1024*1024 - 1) / (8*1024*1024) * (8*1024*1024) ))
+    ROMSIZE_BYTES=$(( (FS_SIZE + 8*1024*1024 - 1) / (8*1024*1024) * (8*1024*1024) ))
+    ROMSIZE="$ROMSIZE_BYTES"
 else
     ROMSIZE_BYTES=$(size_to_bytes "$ROMSIZE")
     if [[ -z "$ROMSIZE_BYTES" ]]; then
@@ -345,6 +392,7 @@ else
     fi
     ROMSIZE="$ROMSIZE_BYTES"
 fi
+FS_OFFSET="$(expr '(' "$FS_SIZE" + 65535 ')' / 65536 '*' 65536)"
 
 # 8) if ROMSIZE+OVERLAYSIZE > partition size, unmount loop device and use dd to add 0 bytes to the end of working file to expand it
 OVERLAYSIZE_BYTES=$(size_to_bytes "$OVERLAYSIZE")
@@ -363,9 +411,61 @@ if (( TOTAL_SIZE_BYTES > PART_SIZE_BYTES )); then
     sudo losetup -P "$LOOP_DEVICE" "$WORKING_FILE" || { output "Error: Failed to setup loop device"; exit 1; }
 fi
 
-# 9) unmount the loop device
+# 9) remount the loop device
+sudo losetup -P "$LOOP_DEVICE" "$WORKING_FILE" || { output "Error: Failed to setup loop device"; exit 1; }
+
+# 10) delete the partition and recreate it with new size at the same starting offset
+PART_START_BYTES="$(sudo parted -s "$LOOP_DEVICE" unit B print 2>/dev/null | awk -v p="$PART_NUM" '
+$1==p {
+    s=$2;
+    sub(/B$/,"",s);
+    s+=0;
+    print s;
+    exit
+}
+')"
+if [[ -z "$PART_START_BYTES" ]]; then
+    output "Error: Failed to get partition start offset"
+    sudo losetup -d "$LOOP_DEVICE"
+    exit 1
+fi
+sudo parted -s "$LOOP_DEVICE" rm "$PART_NUM" || { output "Error: Failed to delete partition"; exit 1; }
+PART_END_BYTES=$(( PART_START_BYTES + ROMSIZE_BYTES ))
+sudo parted -s "$LOOP_DEVICE" mkpart primary "$PART_START_BYTES"B "$PART_END_BYTES"B || { output "Error: Failed to create new partition"; exit 1; }
+
+# 11) use dd to write zeroes to fill up the rest part of the squashfs partition according to FS_OFFSET using loop partition (optional, but good for f2fs)
+SQUASHFS_PARTITION="${LOOP_DEVICE}p${PART_NUM}"
+CURRENT_SQUASHFS_SIZE_BYTES="$(sudo blockdev --getsize64 "$SQUASHFS_PARTITION")"
+# Overwrite the rest of the squashfs partition (outside sfs data) with zeroes for better compression
+if (( FS_OFFSET < CURRENT_SQUASHFS_SIZE_BYTES )); then
+    ZERO_START=$FS_OFFSET
+    ZERO_COUNT=$(( CURRENT_SQUASHFS_SIZE_BYTES - FS_OFFSET ))
+    sudo dd if=/dev/zero of="$SQUASHFS_PARTITION" bs=1 seek=$ZERO_START count=$ZERO_COUNT conv=notrunc status=none || { output "Error: Failed to zero squashfs partition tail"; exit 1; }
+fi
+
+# 12) create overlay filesystem in the remaining space behind the new sfs partition with label rootfs_data
+OVERLAY_PART_START_BYTES=$PART_END_BYTES+1
+OVERLAY_PART_END_BYTES=$(( PART_START_BYTES + TOTAL_SIZE_BYTES ))
+case "$OVERLAY_FS" in
+    "ext4")
+        sudo parted -s "$LOOP_DEVICE" mkpart primary ext4 "$OVERLAY_PART_START_BYTES"B "$OVERLAY_PART_END_BYTES"B || { output "Error: Failed to create overlay partition"; exit 1; }
+        OVERLAY_PARTITION="${LOOP_DEVICE}p$(( PART_NUM + 1 ))"
+        sudo mkfs.ext4 -L rootfs_data "$OVERLAY_PARTITION" || { output "Error: Failed to create ext4 filesystem on overlay partition"; exit 1; }
+        ;;
+    "f2fs")
+        sudo parted -s "$LOOP_DEVICE" mkpart primary f2fs "$OVERLAY_PART_START_BYTES"B "$OVERLAY_PART_END_BYTES"B || { output "Error: Failed to create overlay partition"; exit 1; }
+        OVERLAY_PARTITION="${LOOP_DEVICE}p$(( PART_NUM + 1 ))"
+        sudo mkfs.f2fs -l rootfs_data "$OVERLAY_PARTITION" || { output "Error: Failed to create f2fs filesystem on overlay partition"; exit 1; }
+        ;;
+    *)
+        output "Error: Unsupported overlay filesystem: $OVERLAY_FS"
+        sudo losetup -d "$LOOP_DEVICE"
+        exit 1
+        ;;
+esac
+
+
+# 20) unmount the loop device
 sudo losetup -d "$LOOP_DEVICE" || { output "Error: Failed to detach loop device"; exit 1; }
 
-# 10) locate the hidden overlay filesystem
-# (implementation depends on specific image structure)
-FS_OFFSET="$(expr '(' "$FS_SIZE" + 65535 ')' / 65536 '*' 65536)"
+
