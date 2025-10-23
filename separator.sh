@@ -5,11 +5,13 @@ DECOMP="auto"
 COMP=""
 ROMSIZE=""
 OVERLAYSIZE=""
-OVERLAY_FS=""
+OVERLAY_FS="ext4"
 KEEP_TEMP=false
 TEMP_FILE=""
 RAW_MODE=false
 WORKING_FILE=""
+SILENT_MODE=false
+POS_COUNT=0
 
 # Help function
 usage() {
@@ -20,109 +22,143 @@ usage() {
     echo "  -c <program>         Compression program (default: same as decompression)"
     echo "                       Use 'raw' to skip compression"
     echo "  -k                   Keep temporary files"
-    echo "  -t <file>           Specify temporary file path"
+    echo "  -t <file>            Specify temporary file path"
+    echo "  -s                   Non-interactive"
     echo "  --rom-size <size>    Size of /rom partition"
     echo "                       (default: sfs size rounded up to nearest 8MiB)"
     echo "  --overlay-size <size> Size of /overlay partition (default: 128MiB)"
     echo "  --overlay-filesystem <fs> Filesystem for overlay (default: ext4, alt: f2fs)"
-    echo "  -h, --help          Show this help message"
-    exit 1
+    echo "  -h, --help           Show this help message"
+    exit 0
+}
+
+# Output function
+output() {
+    if [[ "$SILENT_MODE" = false ]]; then
+        echo "$1"
+    fi
+}
+
+# Interactive prompt function (English)
+interactive_prompt() {
+    echo "Welcome to OpenWrt Overlay Separator!"
+    # Only ask for values that are not already provided via parameters
+    if [[ -z "$INPUT_FILE" ]]; then
+        read -p "Enter input file path: " INPUT_FILE
+    fi
+    if [[ -z "$OUTPUT_FILE" ]]; then
+        read -p "Enter output file path: " OUTPUT_FILE
+    fi
+    if [[ -z "$OVERLAYSIZE" ]]; then
+        read -p "Enter overlay size (e.g. 128MiB): " OVERLAYSIZE
+    fi
+    if [[ -z "$ROMSIZE" ]]; then
+        read -p "Enter ROM size (optional, press Enter to auto): " ROMSIZE
+    fi
+    # Only ask for overlay fs if not provided
+    if [[ -z "$OVERLAY_FS" ]]; then
+        read -p "Choose overlay filesystem (ext4/f2fs, default: ext4): " OVERLAY_FS
+        OVERLAY_FS=${OVERLAY_FS:-ext4}
+    fi
+    if [[ "$OVERLAY_FS" != "ext4" && "$OVERLAY_FS" != "f2fs" ]]; then
+        echo "Error: Overlay filesystem must be either ext4 or f2fs"
+        exit 1
+    fi
+    # Ask about KEEP_TEMP only if it wasn't enabled via params
+    if [[ "$KEEP_TEMP" != true ]]; then
+        read -p "Keep temporary files? (y/N): " KEEP_TEMP_ANSWER
+        [[ "$KEEP_TEMP_ANSWER" =~ ^[Yy]$ ]] && KEEP_TEMP=true
+    fi
+    # Do not prompt about silent mode here (non-interactive is -s and should prevent prompts)
 }
 
 # Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -d)
-            DECOMP="$2"
-            [[ "$DECOMP" == "raw" ]] && RAW_MODE=true
-            shift 2
-            ;;
-        -c)
-            COMP="$2"
-            [[ "$COMP" == "raw" ]] && RAW_MODE=true
-            shift 2
-            ;;
-        -k)
-            KEEP_TEMP=true
-            shift
-            ;;
-        -t)
-            TEMP_FILE="$2"
-            shift 2
-            ;;
-        --rom-size)
-            ROMSIZE="$2"
-            shift 2
-            ;;
-        --overlay-size)
-            OVERLAYSIZE="$2"
-            shift 2
-            ;;
-        --overlay-filesystem)
-            OVERLAY_FS="$2"
-            if [[ "$OVERLAY_FS" != "ext4" && "$OVERLAY_FS" != "f2fs" ]]; then
-                echo "Error: Overlay filesystem must be either ext4 or f2fs"
-                exit 1
-            fi
-            shift 2
-            ;;
-        -h|--help)
-            usage
-            ;;
-        *)
-            if [[ -z "$INPUT_FILE" ]]; then
-                INPUT_FILE="$1"
-            elif [[ -z "$OUTPUT_FILE" ]]; then
-                OUTPUT_FILE="$1"
-            else
-                echo "Error: Too many arguments"
+# (previous behavior: interactive only when no args; new: always parse args, then prompt for missing)
+if [[ $# -gt 0 ]]; then
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -d)
+                DECOMP="$2"
+                [[ "$DECOMP" == "raw" ]] && RAW_MODE=true
+                shift 2
+                ;;
+            -c)
+                COMP="$2"
+                [[ "$COMP" == "raw" ]] && RAW_MODE=true
+                shift 2
+                ;;
+            -k)
+                KEEP_TEMP=true
+                shift
+                ;;
+            -t)
+                TEMP_FILE="$2"
+                shift 2
+                ;;
+            -s)
+                SILENT_MODE=true
+                shift
+                ;;
+            --rom-size)
+                ROMSIZE="$2"
+                shift 2
+                ;;
+            --overlay-size)
+                OVERLAYSIZE="$2"
+                shift 2
+                ;;
+            --overlay-filesystem)
+                OVERLAY_FS="$2"
+                if [[ "$OVERLAY_FS" != "ext4" && "$OVERLAY_FS" != "f2fs" ]]; then
+                    output "Error: Overlay filesystem must be either ext4 or f2fs"
+                    exit 1
+                fi
+                shift 2
+                ;;
+            -h|--help)
                 usage
-            fi
-            shift
-            ;;
-    esac
-done
+                ;;
+            *)
+                if [[ -z "$INPUT_FILE" ]]; then
+                    INPUT_FILE="$1"
+                    POS_COUNT=$((POS_COUNT+1))
+                elif [[ -z "$OUTPUT_FILE" ]]; then
+                    OUTPUT_FILE="$1"
+                    POS_COUNT=$((POS_COUNT+1))
+                else
+                    output "Error: Too many arguments"
+                    usage
+                fi
+                shift
+                ;;
+        esac
+    done
+fi
 
-# convert a human size (e.g. 128M, 64MiB, 1024) to bytes (returns empty on error)
-size_to_bytes() {
-    local s=$(echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    if [[ -z "$s" ]]; then
-        echo ""
-        return
+# If exactly one file name was provided as positional argument, show usage and exit
+if [[ "$POS_COUNT" -eq 1 ]]; then
+    usage
+fi
+
+# After parsing args, if required values are missing and not in non-interactive mode, prompt interactively.
+if [[ -z "$INPUT_FILE" || -z "$OUTPUT_FILE" || -z "$OVERLAYSIZE" ]]; then
+    if [[ "$SILENT_MODE" = false ]]; then
+        interactive_prompt
+    else
+        output "Error: Missing required parameters and non-interactive mode enabled"
+        usage
     fi
-    if [[ "$s" =~ ^([0-9]+)$ ]]; then
-        echo "${BASH_REMATCH[1]}"
-        return
-    fi
-    if [[ "$s" =~ ^([0-9]+)(k|kb|kib)$ ]]; then
-        echo $((${BASH_REMATCH[1]} * 1024))
-        return
-    fi
-    if [[ "$s" =~ ^([0-9]+)(m|mb|mib)$ ]]; then
-        echo $((${BASH_REMATCH[1]} * 1024**2))
-        return
-    fi
-    if [[ "$s" =~ ^([0-9]+)(g|gb|gib)$ ]]; then
-        echo $((${BASH_REMATCH[1]} * 1024**3))
-        return
-    fi
-    if [[ "$s" =~ ^([0-9]+)(t|tb|tib)$ ]]; then
-        echo $((${BASH_REMATCH[1]} * 1024**4))
-        return
-    fi
-    # fallback empty on unrecognized format
-    echo ""
-}
+fi
 
 # Validate required arguments
 if [[ -z "$INPUT_FILE" || -z "$OUTPUT_FILE" ]]; then
-    echo "Error: Input and output files are required"
+    output "Error: Input and output files are required"
     usage
 fi
 
 # OVERLAYSIZE is required
 if [[ -z "$OVERLAYSIZE" ]]; then
-    echo "Error: --overlay-size is required"
+    output "Error: --overlay-size is required"
     usage
 fi
 
@@ -133,21 +169,51 @@ fi
 
 # Auto-detect compression if DECOMP is "auto"
 if [[ "$DECOMP" == "auto" ]]; then
+    detected="unknown"
     if file "$INPUT_FILE" | grep -q "gzip compressed"; then
-        DECOMP="gzip"
-        [[ -z "$COMP" ]] && COMP="gzip"
+        detected="gzip"
     elif file "$INPUT_FILE" | grep -q "XZ compressed"; then
-        DECOMP="xz"
-        [[ -z "$COMP" ]] && COMP="xz"
+        detected="xz"
     elif file "$INPUT_FILE" | grep -q "bzip2 compressed"; then
-        DECOMP="bzip2"
-        [[ -z "$COMP" ]] && COMP="bzip2"
+        detected="bzip2"
     elif file "$INPUT_FILE" | grep -q "Zstandard compressed"; then
-        DECOMP="zstd"
-        [[ -z "$COMP" ]] && COMP="zstd"
+        detected="zstd"
+    fi
+
+    if [[ "$SILENT_MODE" = false ]]; then
+        # Interactive: show detected and allow override (only if user didn't provide DECOMP via args)
+        if [[ "$detected" == "unknown" ]]; then
+            read -p "Compression format could not be auto-detected. Choose decompression program (gzip/xz/bzip2/zstd/raw): " user_decomp
+            if [[ -n "$user_decomp" ]]; then
+                DECOMP="$user_decomp"
+            else
+                output "Error: No decompression program chosen"
+                exit 1
+            fi
+        else
+            read -p "Detected compression: $detected. Use this for decompression? (default: $detected) " ans_decomp
+            if [[ -n "$ans_decomp" ]]; then
+                DECOMP="$ans_decomp"
+            else
+                DECOMP="$detected"
+            fi
+        fi
+
+        # Ask for compression program for output if not already specified
+        read -p "Choose compression program for output (gzip/xz/bzip2/zstd/raw) [default: $DECOMP]: " user_comp
+        if [[ -n "$user_comp" ]]; then
+            COMP="$user_comp"
+        else
+            COMP="$DECOMP"
+        fi
     else
-        echo "Error: Unable to detect compression format"
-        exit 1
+        # Non-interactive: require detection to succeed
+        if [[ "$detected" == "unknown" ]]; then
+            output "Error: Unable to detect compression format"
+            exit 1
+        fi
+        DECOMP="$detected"
+        [[ -z "$COMP" ]] && COMP="$detected"
     fi
 fi
 
@@ -156,7 +222,7 @@ case "$DECOMP" in
     "gzip"|"xz"|"bzip2"|"zstd"|"raw")
         ;;
     *)
-        echo "Error: Unsupported decompression program: $DECOMP"
+        output "Error: Unsupported decompression program: $DECOMP"
         exit 1
         ;;
 esac
@@ -166,7 +232,7 @@ case "$COMP" in
     "gzip"|"xz"|"bzip2"|"zstd"|"raw")
         ;;
     *)
-        echo "Error: Unsupported compression program: $COMP"
+        output "Error: Unsupported compression program: $COMP"
         exit 1
         ;;
 esac
@@ -174,7 +240,7 @@ esac
 # 1) lookup an unused loop device, if not found, exit with error
 LOOP_DEVICE=$(losetup -f)
 if [[ -z "$LOOP_DEVICE" ]]; then
-    echo "Error: No unused loop device found"
+    output "Error: No unused loop device found"
     exit 1
 fi
 
@@ -182,7 +248,7 @@ fi
 if [[ "$RAW_MODE" = true ]]; then
     # In raw mode, copy the input file to the output file and use it directly
     if ! cp "$INPUT_FILE" "$OUTPUT_FILE"; then
-        echo "Error: Cannot copy input file to output file: $OUTPUT_FILE"
+        output "Error: Cannot copy input file to output file: $OUTPUT_FILE"
         exit 1
     fi
     WORKING_FILE="$OUTPUT_FILE"
@@ -198,28 +264,28 @@ else
 
     # Check if temporary file path is writable
     if ! touch "$TEMP_FILE" 2>/dev/null; then
-        echo "Error: Cannot write to temporary file: $TEMP_FILE"
+        output "Error: Cannot write to temporary file: $TEMP_FILE"
         exit 1
     fi
 
-    # 3) decompress the input file into a temporary file
+# 3) decompress the input file into a temporary file
     if [[ "$DECOMP" != "raw" ]]; then
-        "$DECOMP" -dk "$INPUT_FILE" || { echo "Error: Decompression failed"; exit 1; }
+        "$DECOMP" -dk "$INPUT_FILE" || { output "Error: Decompression failed"; exit 1; }
         # Get the decompressed file name (remove compression extension)
         DECOMP_FILE="${INPUT_FILE%.*}"
-        mv "$DECOMP_FILE" "$TEMP_FILE" || { echo "Error: Failed to move decompressed file"; exit 1; }
+        mv "$DECOMP_FILE" "$TEMP_FILE" || { output "Error: Failed to move decompressed file"; exit 1; }
     fi
     WORKING_FILE="$TEMP_FILE"
 fi
 
 # Check if working file exists and is writable
 if ! touch "$WORKING_FILE" 2>/dev/null; then
-    echo "Error: Cannot write to working file: $WORKING_FILE"
+    output "Error: Cannot write to working file: $WORKING_FILE"
     exit 1
 fi
 
 # 4) mount the working file as a loop device with partition scanning
-sudo losetup -P "$LOOP_DEVICE" "$WORKING_FILE" || { echo "Error: Failed to setup loop device"; exit 1; }
+sudo losetup -P "$LOOP_DEVICE" "$WORKING_FILE" || { output "Error: Failed to setup loop device"; exit 1; }
 
 # 5) find out which partition is sfs
 PART_INFO=""
@@ -235,7 +301,7 @@ while read -r line; do
     fi
 done < <(sudo fdisk -l "$LOOP_DEVICE" 2>/dev/null | grep "$LOOP_DEVICE")
 if [[ -z "$PART_INFO" ]]; then
-    echo "Error: No squashfs partition found in the image"
+    output "Error: No squashfs partition found in the image"
     sudo losetup -d "$LOOP_DEVICE"
     exit 1
 fi
@@ -268,12 +334,12 @@ if [[ -z "$ROMSIZE" ]]; then
 else
     ROMSIZE_BYTES=$(size_to_bytes "$ROMSIZE")
     if [[ -z "$ROMSIZE_BYTES" ]]; then
-        echo "Error: Invalid rom size: $ROMSIZE"
+        output "Error: Invalid rom size: $ROMSIZE"
         sudo losetup -d "$LOOP_DEVICE"
         exit 1
     fi
     if (( ROMSIZE_BYTES < FS_SIZE )); then
-        echo "Error: Specified rom size ($ROMSIZE_BYTES bytes) is less than filesystem size ($FS_SIZE bytes)"
+        output "Error: Specified rom size ($ROMSIZE_BYTES bytes) is less than filesystem size ($FS_SIZE bytes)"
         sudo losetup -d "$LOOP_DEVICE"
         exit 1
     fi
@@ -283,24 +349,23 @@ fi
 # 8) if ROMSIZE+OVERLAYSIZE > partition size, unmount loop device and use dd to add 0 bytes to the end of working file to expand it
 OVERLAYSIZE_BYTES=$(size_to_bytes "$OVERLAYSIZE")
 if [[ -z "$OVERLAYSIZE_BYTES" ]]; then
-    echo "Error: Invalid overlay size: $OVERLAYSIZE"
+    output "Error: Invalid overlay size: $OVERLAYSIZE"
     sudo losetup -d "$LOOP_DEVICE"
     exit 1
 fi
 TOTAL_SIZE_BYTES=$(( ROMSIZE_BYTES + OVERLAYSIZE_BYTES ))
 if (( TOTAL_SIZE_BYTES > PART_SIZE_BYTES )); then
     # unmount loop device
-    sudo losetup -d "$LOOP_DEVICE" || { echo "Error: Failed to detach loop device"; exit 1; }
+    sudo losetup -d "$LOOP_DEVICE" || { output "Error: Failed to detach loop device"; exit 1; }
     # expand working file
-    dd if=/dev/zero bs=1 count=$(( TOTAL_SIZE_BYTES - PART_SIZE_BYTES )) >> "$WORKING_FILE" || { echo "Error: Failed to expand working file"; exit 1; }
+    dd if=/dev/zero bs=1 count=$(( TOTAL_SIZE_BYTES - PART_SIZE_BYTES )) >> "$WORKING_FILE" || { output "Error: Failed to expand working file"; exit 1; }
     # remount loop device with partition scanning
-    sudo losetup -P "$LOOP_DEVICE" "$WORKING_FILE" || { echo "Error: Failed to setup loop device"; exit 1; }
+    sudo losetup -P "$LOOP_DEVICE" "$WORKING_FILE" || { output "Error: Failed to setup loop device"; exit 1; }
 fi
 
 # 9) unmount the loop device
-sudo losetup -d "$LOOP_DEVICE" || { echo "Error: Failed to detach loop device"; exit 1; }
+sudo losetup -d "$LOOP_DEVICE" || { output "Error: Failed to detach loop device"; exit 1; }
 
 # 10) locate the hidden overlay filesystem
 # (implementation depends on specific image structure)
-FS_OFFSET="$(expr '(' "$FS_SIZE" + 65535 ')' / 65536 '*' 65536)" 
-
+FS_OFFSET="$(expr '(' "$FS_SIZE" + 65535 ')' / 65536 '*' 65536)"
