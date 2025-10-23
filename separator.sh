@@ -490,19 +490,19 @@ if [[ "$RAW_MODE" != true ]]; then
     case "$COMP" in
         "gzip")
             gzip $COMP_FLAGS "$WORKING_FILE" || { output "Error: Compression failed"; exit 1; }
-            echo "Done! Output file: $OUTPUT_FILE.gz"
+            echo "Done! Output file: $WORKING_FILE.gz"
             ;;
         "xz")
             xz $COMP_FLAGS "$WORKING_FILE" || { output "Error: Compression failed"; exit 1; }
-            echo "Done! Output file: $OUTPUT_FILE.xz"
+            echo "Done! Output file: $WORKING_FILE.xz"
             ;;
         "bzip2")
             bzip2 $COMP_FLAGS "$WORKING_FILE" || { output "Error: Compression failed"; exit 1; }
-            echo "Done! Output file: $OUTPUT_FILE.bz2"
+            echo "Done! Output file: $WORKING_FILE.bz2"
             ;;
         "zstd")
             zstd $COMP_FLAGS "$WORKING_FILE" || { output "Error: Compression failed"; exit 1; }
-            echo "Done! Output file: $OUTPUT_FILE.zst"
+            echo "Done! Output file: $WORKING_FILE.zst"
             ;;
     esac
     exit 0
