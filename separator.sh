@@ -316,7 +316,7 @@ else
 
     # 3) decompress the input file into a temporary file
     if [[ "$DECOMP" != "raw" ]]; then
-        "$DECOMP" -dk "$INPUT_FILE" || { output "Error: Decompression failed"; exit 1; }
+        "$DECOMP" -dk "$INPUT_FILE" || { output "Error: Decompression failed"; }
         # Get the decompressed file name (remove compression extension)
         DECOMP_FILE="${INPUT_FILE%.*}"
         mv "$DECOMP_FILE" "$TEMP_FILE" || { output "Error: Failed to move decompressed file"; exit 1; }
@@ -335,18 +335,21 @@ sudo losetup -P "$LOOP_DEVICE" "$WORKING_FILE" || { output "Error: Failed to set
 
 # 5) find out which partition is sfs
 PART_INFO=""
-# List all partitions
-while read -r line; do
-    if [[ $line =~ $LOOP_DEVICE ]]; then
-        PARTITION="${LOOP_DEVICE}p${line##*$LOOP_DEVICE}"
-        # Try to check if it's a squashfs partition
-        if sudo unsquashfs -s "$PARTITION" &>/dev/null; then
-            PART_INFO="$line"
-            break
-        fi
+PARTITION=""
+# List all partitions and find squashfs
+while read -r part; do
+    # Try to check if it's a squashfs partition
+    if sudo unsquashfs -s "$part" &>/dev/null; then
+        PARTITION="$part"
+        # Extract the partition number from the device name
+        PART_NUM="${part##*p}"
+        # Get the corresponding line from fdisk for this partition
+        PART_INFO=$(sudo fdisk -l "$LOOP_DEVICE" 2>/dev/null | grep "${LOOP_DEVICE}p${PART_NUM}")
+        break
     fi
-done < <(sudo fdisk -l "$LOOP_DEVICE" 2>/dev/null | grep "$LOOP_DEVICE")
-if [[ -z "$PART_INFO" ]]; then
+done < <(ls "${LOOP_DEVICE}"p* 2>/dev/null)
+
+if [[ -z "$PARTITION" ]]; then
     output "Error: No squashfs partition found in the image"
     sudo losetup -d "$LOOP_DEVICE"
     exit 1
@@ -405,14 +408,19 @@ TOTAL_SIZE_BYTES=$(( ROMSIZE_BYTES + OVERLAYSIZE_BYTES ))
 if (( TOTAL_SIZE_BYTES > PART_SIZE_BYTES )); then
     # unmount loop device
     sudo losetup -d "$LOOP_DEVICE" || { output "Error: Failed to detach loop device"; exit 1; }
-    # expand working file
-    dd if=/dev/zero bs=1 count=$(( TOTAL_SIZE_BYTES - PART_SIZE_BYTES )) >> "$WORKING_FILE" || { output "Error: Failed to expand working file"; exit 1; }
+    # expand working file (round up to 512-byte boundary)
+    EXPAND_SIZE=$(( TOTAL_SIZE_BYTES - PART_SIZE_BYTES ))
+    EXPAND_SIZE_ALIGNED=$(( (EXPAND_SIZE + 511) / 512 * 512 ))
+    dd if=/dev/zero bs=512 count=$(( EXPAND_SIZE_ALIGNED / 512 )) >> "$WORKING_FILE" || { output "Error: Failed to expand working file"; exit 1; }
+    # lookup an unused loop device again
+    LOOP_DEVICE=$(losetup -f)
+    if [[ -z "$LOOP_DEVICE" ]]; then
+        output "Error: No unused loop device found"
+        exit 1
+    fi
     # remount loop device with partition scanning
     sudo losetup -P "$LOOP_DEVICE" "$WORKING_FILE" || { output "Error: Failed to setup loop device"; exit 1; }
 fi
-
-# 9) remount the loop device
-sudo losetup -P "$LOOP_DEVICE" "$WORKING_FILE" || { output "Error: Failed to setup loop device"; exit 1; }
 
 # 10) delete the partition and recreate it with new size at the same starting offset
 PART_START_BYTES="$(sudo parted -s "$LOOP_DEVICE" unit B print 2>/dev/null | awk -v p="$PART_NUM" '
