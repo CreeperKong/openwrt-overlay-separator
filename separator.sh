@@ -443,29 +443,69 @@ if (( FS_OFFSET < CURRENT_SQUASHFS_SIZE_BYTES )); then
     sudo dd if=/dev/zero of="$SQUASHFS_PARTITION" bs=1 seek=$ZERO_START count=$ZERO_COUNT conv=notrunc status=none || { output "Error: Failed to zero squashfs partition tail"; exit 1; }
 fi
 
-# 12) create overlay filesystem in the remaining space behind the new sfs partition with label rootfs_data
-OVERLAY_PART_START_BYTES=$PART_END_BYTES+1
-OVERLAY_PART_END_BYTES=$(( PART_START_BYTES + TOTAL_SIZE_BYTES ))
-case "$OVERLAY_FS" in
-    "ext4")
-        sudo parted -s "$LOOP_DEVICE" mkpart primary ext4 "$OVERLAY_PART_START_BYTES"B "$OVERLAY_PART_END_BYTES"B || { output "Error: Failed to create overlay partition"; exit 1; }
-        OVERLAY_PARTITION="${LOOP_DEVICE}p$(( PART_NUM + 1 ))"
-        sudo mkfs.ext4 -L rootfs_data "$OVERLAY_PARTITION" || { output "Error: Failed to create ext4 filesystem on overlay partition"; exit 1; }
-        ;;
-    "f2fs")
-        sudo parted -s "$LOOP_DEVICE" mkpart primary f2fs "$OVERLAY_PART_START_BYTES"B "$OVERLAY_PART_END_BYTES"B || { output "Error: Failed to create overlay partition"; exit 1; }
-        OVERLAY_PARTITION="${LOOP_DEVICE}p$(( PART_NUM + 1 ))"
-        sudo mkfs.f2fs -l rootfs_data "$OVERLAY_PARTITION" || { output "Error: Failed to create f2fs filesystem on overlay partition"; exit 1; }
-        ;;
-    *)
-        output "Error: Unsupported overlay filesystem: $OVERLAY_FS"
-        sudo losetup -d "$LOOP_DEVICE"
-        exit 1
-        ;;
-esac
+# 12) create overlay partition with the size specified in $OVERLAYSIZE and save the partition block to $OVERLAY_PARTITION
+# get current partition layout with sfdisk -d and save all used partition number to a variable
+PART_NUMBERS=$(sudo sfdisk -d "$LOOP_DEVICE" 2>/dev/null | awk '/^\/dev\/loop/ {print $1}' | sed 's/.*p//' | paste -sd,)
+# create new partition
+OVERLAY_START_BYTES=$(( PART_END_BYTES ))
+OVERLAY_END_BYTES=$(( OVERLAY_START_BYTES + OVERLAYSIZE_BYTES ))
+sudo parted -s "$LOOP_DEVICE" mkpart primary "$OVERLAY_START_BYTES"B "$OVERLAY_END_BYTES"B || { output "Error: Failed to create overlay partition"; exit 1; }
+# sfdisk -d again to find out the number of the newly created partition which is not in PART_NUMBERS
+NEW_PART_NUMBERS=$(sudo sfdisk -d "$LOOP_DEVICE" 2>/dev/null | awk '/^\/dev\/loop/ {print $1}' | sed 's/.*p//' | paste -sd,)
+# Find the new partition number
+for num in $(echo "$NEW_PART_NUMBERS" | tr ',' ' '); do
+    if ! echo ",$PART_NUMBERS," | grep -q ",$num,"; then
+        NEW_PART_NUM="$num"
+        break
+    fi
+done
+if [[ -z "$NEW_PART_NUM" ]]; then
+    output "Error: Failed to determine new overlay partition number"
+    sudo losetup -d "$LOOP_DEVICE"
+    exit 1
+fi
 
+OVERLAY_PARTITION="${LOOP_DEVICE}p${NEW_PART_NUM}"
 
-# 20) unmount the loop device
+# 13) format overlay partition with specified filesystem
+if [[ "$OVERLAY_FS" == "ext4" ]]; then
+    sudo mkfs.ext4 -F -L rootfs_data "$OVERLAY_PARTITION" || { output "Error: Failed to format overlay partition"; sudo losetup -d "$LOOP_DEVICE"; exit 1; }
+else
+    sudo mkfs.f2fs -f -l rootfs_data "$OVERLAY_PARTITION" || { output "Error: Failed to format overlay partition"; sudo losetup -d "$LOOP_DEVICE"; exit 1; }
+fi
+
+# 14) unmount the loop device
 sudo losetup -d "$LOOP_DEVICE" || { output "Error: Failed to detach loop device"; exit 1; }
 
+# 15) compress the working file to output file if not in raw mode
+if [[ "$RAW_MODE" != true ]]; then
+    output "Compressing output file..."
+    
+    # Prepare compression flags
+    COMP_FLAGS=""
+    if [[ "$KEEP_TEMP" == true ]]; then
+        COMP_FLAGS="-k"
+    fi
+    
+    case "$COMP" in
+        "gzip")
+            gzip $COMP_FLAGS "$WORKING_FILE" || { output "Error: Compression failed"; exit 1; }
+            echo "Done! Output file: $OUTPUT_FILE.gz"
+            ;;
+        "xz")
+            xz $COMP_FLAGS "$WORKING_FILE" || { output "Error: Compression failed"; exit 1; }
+            echo "Done! Output file: $OUTPUT_FILE.xz"
+            ;;
+        "bzip2")
+            bzip2 $COMP_FLAGS "$WORKING_FILE" || { output "Error: Compression failed"; exit 1; }
+            echo "Done! Output file: $OUTPUT_FILE.bz2"
+            ;;
+        "zstd")
+            zstd $COMP_FLAGS "$WORKING_FILE" || { output "Error: Compression failed"; exit 1; }
+            echo "Done! Output file: $OUTPUT_FILE.zst"
+            ;;
+    esac
+    exit 0
+fi
 
+echo "Done! Output file: $OUTPUT_FILE"
