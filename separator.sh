@@ -481,31 +481,29 @@ sudo losetup -d "$LOOP_DEVICE" || { output "Error: Failed to detach loop device"
 if [[ "$RAW_MODE" != true ]]; then
     output "Compressing output file..."
     
-    # Prepare compression flags
-    COMP_FLAGS=""
-    if [[ "$KEEP_TEMP" == true ]]; then
-        COMP_FLAGS="-k"
-    fi
-    
     case "$COMP" in
         "gzip")
-            gzip $COMP_FLAGS "$WORKING_FILE" || { output "Error: Compression failed"; exit 1; }
-            echo "Done! Output file: $WORKING_FILE.gz"
+            gzip -c "$WORKING_FILE" > "$OUTPUT_FILE" || { output "Error: Compression failed"; exit 1; }
             ;;
         "xz")
-            xz $COMP_FLAGS "$WORKING_FILE" || { output "Error: Compression failed"; exit 1; }
-            echo "Done! Output file: $WORKING_FILE.xz"
+            xz -c "$WORKING_FILE" > "$OUTPUT_FILE" || { output "Error: Compression failed"; exit 1; }
             ;;
         "bzip2")
-            bzip2 $COMP_FLAGS "$WORKING_FILE" || { output "Error: Compression failed"; exit 1; }
-            echo "Done! Output file: $WORKING_FILE.bz2"
+            bzip2 -c "$WORKING_FILE" > "$OUTPUT_FILE" || { output "Error: Compression failed"; exit 1; }
             ;;
         "zstd")
-            zstd $COMP_FLAGS "$WORKING_FILE" || { output "Error: Compression failed"; exit 1; }
-            echo "Done! Output file: $WORKING_FILE.zst"
+            zstd -c "$WORKING_FILE" > "$OUTPUT_FILE" || { output "Error: Compression failed"; exit 1; }
             ;;
     esac
-    exit 0
+    
+    # Clean up temp file if not keeping it
+    if [[ "$KEEP_TEMP" != true ]]; then
+        rm -f "$WORKING_FILE"
+    fi
+fi
+
+if [[ "$RAW_MODE" = true ]]; then
+    mv "$WORKING_FILE" "$OUTPUT_FILE" || { output "Error: Failed to move working file to output file"; exit 1; }
 fi
 
 echo "Done! Output file: $OUTPUT_FILE"
