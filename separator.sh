@@ -303,29 +303,59 @@ if [[ "$COMP" = "raw" ]]; then
             exit 1
         fi
     else
-        # Decompress to output file
-        "$DECOMP" -dk "$INPUT_FILE" || { output "Error: Decompression failed"; exit 1; }
-        # Get the decompressed file name (remove compression extension)
-        DECOMP_FILE="${INPUT_FILE%.*}"
-        mv "$DECOMP_FILE" "$OUTPUT_FILE" || { output "Error: Failed to move decompressed file"; exit 1; }
+        # Decompress to output file, ignoring trailing garbage warnings
+        case "$DECOMP" in
+            gzip)
+                gzip -dc "$INPUT_FILE" > "$OUTPUT_FILE" || { output "Error: Decompression failed"; exit 1; }
+                ;;
+            xz)
+                xz -dc "$INPUT_FILE" > "$OUTPUT_FILE" || { output "Error: Decompression failed"; exit 1; }
+                ;;
+            bzip2)
+                bzip2 -dc "$INPUT_FILE" > "$OUTPUT_FILE" || { output "Error: Decompression failed"; exit 1; }
+                ;;
+            zstd)
+                zstd -dc "$INPUT_FILE" > "$OUTPUT_FILE" || { output "Error: Decompression failed"; exit 1; }
+                ;;
+            *)
+                "$DECOMP" -dk "$INPUT_FILE" || { output "Error: Decompression failed"; exit 1; }
+                DECOMP_FILE="${INPUT_FILE%.*}"
+                mv "$DECOMP_FILE" "$OUTPUT_FILE" || { output "Error: Failed to move decompressed file"; exit 1; }
+                ;;
+        esac
     fi
     WORKING_FILE="$OUTPUT_FILE"
 else
     # Normal mode with temporary file handling in /tmp
-    if [[ -z "$TEMP_FILE" ]]; then
-        if [[ "$KEEP_TEMP" = true ]]; then
-            TEMP_FILE="${INPUT_FILE}.temp"
-        else
-            # Put temp file into /tmp
-            TEMP_FILE="$(mktemp -p /tmp)"
+    # 3) decompress the input file into a temporary file
+    if [[ "$DECOMP" != "raw" ]]; then
+        case "$DECOMP" in
+            gzip)
+                gzip -dc "$INPUT_FILE" > "$TEMP_FILE" || { output "Error: Decompression failed"; exit 1; }
+                ;;
+            xz)
+                xz -dc "$INPUT_FILE" > "$TEMP_FILE" || { output "Error: Decompression failed"; exit 1; }
+                ;;
+            bzip2)
+                bzip2 -dc "$INPUT_FILE" > "$TEMP_FILE" || { output "Error: Decompression failed"; exit 1; }
+                ;;
+            zstd)
+                zstd -dc "$INPUT_FILE" > "$TEMP_FILE" || { output "Error: Decompression failed"; exit 1; }
+                ;;
+            *)
+                "$DECOMP" -dk "$INPUT_FILE" || { output "Error: Decompression failed"; exit 1; }
+                DECOMP_FILE="${INPUT_FILE%.*}"
+                mv "$DECOMP_FILE" "$TEMP_FILE" || { output "Error: Failed to move decompressed file"; exit 1; }
+                ;;
+        esac
+    else
+        # DECOMP is raw, copy input to temp file
+        if ! cp "$INPUT_FILE" "$TEMP_FILE"; then
+            output "Error: Cannot copy input file to temp file: $TEMP_FILE"
+            exit 1
         fi
     fi
-
-    # Check if temporary file path is writable
-    if ! touch "$TEMP_FILE" 2>/dev/null; then
-        output "Error: Cannot write to temporary file: $TEMP_FILE"
-        exit 1
-    fi
+    WORKING_FILE="$TEMP_FILE"
 
     # 3) decompress the input file into a temporary file
     if [[ "$DECOMP" != "raw" ]]; then
