@@ -1,7 +1,5 @@
 # openwrt-overlay-separator
 
-This script is not yet completed.
-
 CURRENTLY WORK IN PROGRESS! Use for test only!
 
 Contributions are welcome.
