@@ -284,11 +284,13 @@ case "$COMP" in
 esac
 
 # 1) lookup an unused loop device, if not found, exit with error
+output "Looking for available loop device..."
 LOOP_DEVICE=$(losetup -f)
 if [[ -z "$LOOP_DEVICE" ]]; then
     output "Error: No unused loop device found"
     exit 1
 fi
+output "Found loop device: $LOOP_DEVICE"
 
 # 2) prepare file handling
 if [[ "$COMP" = "raw" ]]; then
@@ -348,7 +350,14 @@ if ! touch "$WORKING_FILE" 2>/dev/null; then
 fi
 
 # 4) mount the working file as a loop device with partition scanning
-sudo losetup -P "$LOOP_DEVICE" "$WORKING_FILE" || { output "Error: Failed to setup loop device"; exit 1; }
+output "Setting up loop device $LOOP_DEVICE for $WORKING_FILE..."
+if ! sudo losetup -v -P "$LOOP_DEVICE" "$WORKING_FILE"; then
+    output "Error: Failed to setup loop device"
+    output "Loop device: $LOOP_DEVICE"
+    output "Working file: $WORKING_FILE"
+    exit 1
+fi
+output "Loop device setup successful"
 
 # 5) find out which partition is sfs
 PART_INFO=""
@@ -424,19 +433,37 @@ fi
 TOTAL_SIZE_BYTES=$(( ROMSIZE_BYTES + OVERLAYSIZE_BYTES ))
 if (( TOTAL_SIZE_BYTES > PART_SIZE_BYTES )); then
     # unmount loop device
-    sudo losetup -d "$LOOP_DEVICE" || { output "Error: Failed to detach loop device"; exit 1; }
+    output "Detaching loop device for expansion..."
+    if ! sudo losetup -v -d "$LOOP_DEVICE"; then
+        output "Error: Failed to detach loop device"
+        exit 1
+    fi
+    output "Loop device detached"
+    
     # expand working file (round up to 512-byte boundary)
     EXPAND_SIZE=$(( TOTAL_SIZE_BYTES - PART_SIZE_BYTES ))
     EXPAND_SIZE_ALIGNED=$(( (EXPAND_SIZE + 511) / 512 * 512 ))
+    output "Expanding working file by $EXPAND_SIZE_ALIGNED bytes..."
     dd if=/dev/zero bs=512 count=$(( EXPAND_SIZE_ALIGNED / 512 )) >> "$WORKING_FILE" || { output "Error: Failed to expand working file"; exit 1; }
+    
     # lookup an unused loop device again
+    output "Looking for available loop device after expansion..."
     LOOP_DEVICE=$(losetup -f)
     if [[ -z "$LOOP_DEVICE" ]]; then
         output "Error: No unused loop device found"
         exit 1
     fi
+    output "Found loop device: $LOOP_DEVICE"
+    
     # remount loop device with partition scanning
-    sudo losetup -P "$LOOP_DEVICE" "$WORKING_FILE" || { output "Error: Failed to setup loop device"; exit 1; }
+    output "Remounting loop device after expansion..."
+    if ! sudo losetup -v -P "$LOOP_DEVICE" "$WORKING_FILE"; then
+        output "Error: Failed to setup loop device after expansion"
+        output "Loop device: $LOOP_DEVICE"
+        output "Working file: $WORKING_FILE"
+        exit 1
+    fi
+    output "Loop device remounted successfully"
 fi
 
 # 10) delete the partition and recreate it with new size at the same starting offset
@@ -508,7 +535,13 @@ else
 fi
 
 # 14) unmount the loop device
-sudo losetup -d "$LOOP_DEVICE" || { output "Error: Failed to detach loop device"; exit 1; }
+output "Detaching loop device..."
+if ! sudo losetup -v -d "$LOOP_DEVICE"; then
+    output "Error: Failed to detach loop device"
+    output "Loop device: $LOOP_DEVICE"
+    exit 1
+fi
+output "Loop device detached successfully"
 
 # 15) compress the working file to output file if compression is not raw
 if [[ "$COMP" != "raw" ]]; then
