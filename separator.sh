@@ -375,6 +375,7 @@ fi
 output "Loop device setup successful"
 
 # 5) find out which partition is sfs
+sleep 4   # wait a moment for partitions to be available
 PART_INFO=""
 PARTITION=""
 # List all partitions and find squashfs
@@ -522,7 +523,7 @@ ALIGNMENT_BYTES=$((ALIGNMENT_SECTORS * SECTOR_SIZE))
 
 # Calculate start position aligned to 1MiB boundary
 OVERLAY_START_BYTES=$(( ((PART_END_BYTES + ALIGNMENT_BYTES ) / ALIGNMENT_BYTES) * ALIGNMENT_BYTES ))
-OVERLAY_END_BYTES=$(( OVERLAY_START_BYTES + OVERLAYSIZE_BYTES - 4096 ))
+OVERLAY_END_BYTES=$(( OVERLAY_START_BYTES + OVERLAYSIZE_BYTES - 1048576 ))
 
 sudo parted -s "$LOOP_DEVICE" mkpart primary "$OVERLAY_START_BYTES"B "$OVERLAY_END_BYTES"B || { output "Error: Failed to create overlay partition"; exit 1; }
 # sfdisk -d again to find out the number of the newly created partition which is not in PART_NUMBERS
