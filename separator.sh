@@ -291,20 +291,31 @@ if [[ -z "$LOOP_DEVICE" ]]; then
 fi
 
 # 2) prepare file handling
-if [[ "$RAW_MODE" = true ]]; then
-    # In raw mode, copy the input file to the output file and use it directly
-    if ! cp "$INPUT_FILE" "$OUTPUT_FILE"; then
-        output "Error: Cannot copy input file to output file: $OUTPUT_FILE"
-        exit 1
+if [[ "$COMP" = "raw" ]]; then
+    # When compression is raw, decompress directly to output file and work on that
+    # 3) decompress the input file into the output file
+    if [[ "$DECOMP" = "raw" ]]; then
+        # Both input and output are raw, just copy
+        if ! cp "$INPUT_FILE" "$OUTPUT_FILE"; then
+            output "Error: Cannot copy input file to output file: $OUTPUT_FILE"
+            exit 1
+        fi
+    else
+        # Decompress to output file
+        "$DECOMP" -dk "$INPUT_FILE" || { output "Error: Decompression failed"; exit 1; }
+        # Get the decompressed file name (remove compression extension)
+        DECOMP_FILE="${INPUT_FILE%.*}"
+        mv "$DECOMP_FILE" "$OUTPUT_FILE" || { output "Error: Failed to move decompressed file"; exit 1; }
     fi
     WORKING_FILE="$OUTPUT_FILE"
 else
-    # Normal mode with temporary file handling
+    # Normal mode with temporary file handling in /tmp
     if [[ -z "$TEMP_FILE" ]]; then
         if [[ "$KEEP_TEMP" = true ]]; then
             TEMP_FILE="${INPUT_FILE}.temp"
         else
-            TEMP_FILE="$(mktemp)"
+            # Put temp file into /tmp
+            TEMP_FILE="$(mktemp -p /tmp)"
         fi
     fi
 
@@ -316,10 +327,16 @@ else
 
     # 3) decompress the input file into a temporary file
     if [[ "$DECOMP" != "raw" ]]; then
-        "$DECOMP" -dk "$INPUT_FILE" || { output "Error: Decompression failed"; }
+        "$DECOMP" -dk "$INPUT_FILE" || { output "Error: Decompression failed"; exit 1; }
         # Get the decompressed file name (remove compression extension)
         DECOMP_FILE="${INPUT_FILE%.*}"
         mv "$DECOMP_FILE" "$TEMP_FILE" || { output "Error: Failed to move decompressed file"; exit 1; }
+    else
+        # DECOMP is raw, copy input to temp file
+        if ! cp "$INPUT_FILE" "$TEMP_FILE"; then
+            output "Error: Cannot copy input file to temp file: $TEMP_FILE"
+            exit 1
+        fi
     fi
     WORKING_FILE="$TEMP_FILE"
 fi
@@ -454,9 +471,17 @@ fi
 # 12) create overlay partition with the size specified in $OVERLAYSIZE and save the partition block to $OVERLAY_PARTITION
 # get current partition layout with sfdisk -d and save all used partition number to a variable
 PART_NUMBERS=$(sudo sfdisk -d "$LOOP_DEVICE" 2>/dev/null | awk '/^\/dev\/loop/ {print $1}' | sed 's/.*p//' | paste -sd,)
-# create new partition
-OVERLAY_START_BYTES=$(( PART_END_BYTES ))
-OVERLAY_END_BYTES=$(( OVERLAY_START_BYTES + OVERLAYSIZE_BYTES ))
+
+# Calculate overlay partition start with proper alignment (2048 sectors = 1MiB)
+# Start after the previous partition end, aligned to 2048 sectors (1MiB boundary)
+SECTOR_SIZE=512
+ALIGNMENT_SECTORS=2048
+ALIGNMENT_BYTES=$((ALIGNMENT_SECTORS * SECTOR_SIZE))
+
+# Calculate start position aligned to 1MiB boundary
+OVERLAY_START_BYTES=$(( ((PART_END_BYTES + ALIGNMENT_BYTES ) / ALIGNMENT_BYTES) * ALIGNMENT_BYTES ))
+OVERLAY_END_BYTES=$(( OVERLAY_START_BYTES + OVERLAYSIZE_BYTES - 4096 ))
+
 sudo parted -s "$LOOP_DEVICE" mkpart primary "$OVERLAY_START_BYTES"B "$OVERLAY_END_BYTES"B || { output "Error: Failed to create overlay partition"; exit 1; }
 # sfdisk -d again to find out the number of the newly created partition which is not in PART_NUMBERS
 NEW_PART_NUMBERS=$(sudo sfdisk -d "$LOOP_DEVICE" 2>/dev/null | awk '/^\/dev\/loop/ {print $1}' | sed 's/.*p//' | paste -sd,)
@@ -485,8 +510,8 @@ fi
 # 14) unmount the loop device
 sudo losetup -d "$LOOP_DEVICE" || { output "Error: Failed to detach loop device"; exit 1; }
 
-# 15) compress the working file to output file if not in raw mode
-if [[ "$RAW_MODE" != true ]]; then
+# 15) compress the working file to output file if compression is not raw
+if [[ "$COMP" != "raw" ]]; then
     output "Compressing output file..."
     
     case "$COMP" in
@@ -508,10 +533,9 @@ if [[ "$RAW_MODE" != true ]]; then
     if [[ "$KEEP_TEMP" != true ]]; then
         rm -f "$WORKING_FILE"
     fi
-fi
-
-if [[ "$RAW_MODE" = true ]]; then
-    mv "$WORKING_FILE" "$OUTPUT_FILE" || { output "Error: Failed to move working file to output file"; exit 1; }
+else
+    # When COMP is raw, working file IS the output file, no compression or cleanup needed
+    output "Output file ready (no compression): $OUTPUT_FILE"
 fi
 
 echo "Done! Output file: $OUTPUT_FILE"
