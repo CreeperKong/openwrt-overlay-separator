@@ -1,0 +1,5 @@
+config mount
+	option target '/boot'
+	option label 'kernel'
+	option enabled '1'
+

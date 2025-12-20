@@ -5,7 +5,6 @@ OVERLAY_PART="$(blkid -t LABEL="rootfs_data" -o device | head -n1)"
 # Check if rootfs_data exists and is a real block device (not a loop device)
 if [ -b "$OVERLAY_PART" ] && ! echo "$OVERLAY_PART" | grep -q "loop"; then
 mount_root done
-rm -f /etc/uci-defaults/99-asu-defaults
 if [ ! -e /etc/overlay-expand ] \
 && type parted > /dev/null
 then
