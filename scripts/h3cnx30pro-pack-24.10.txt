@@ -7,4 +7,4 @@ luci-app-wifischedule luci-i18n-wifischedule-ar luci-i18n-wifischedule-bg luci-i
 
 # luci-app-ddns
 # luci-i18n-ddns-ar luci-i18n-ddns-bg luci-i18n-ddns-bn luci-i18n-ddns-ca luci-i18n-ddns-cs luci-i18n-ddns-da luci-i18n-ddns-de luci-i18n-ddns-el luci-i18n-ddns-es luci-i18n-ddns-fa luci-i18n-ddns-fi luci-i18n-ddns-fr luci-i18n-ddns-ga luci-i18n-ddns-he luci-i18n-ddns-hi luci-i18n-ddns-hu luci-i18n-ddns-it luci-i18n-ddns-ja luci-i18n-ddns-ko luci-i18n-ddns-lt luci-i18n-ddns-mr luci-i18n-ddns-ms luci-i18n-ddns-nl luci-i18n-ddns-no luci-i18n-ddns-pl luci-i18n-ddns-pt luci-i18n-ddns-pt-br luci-i18n-ddns-ro luci-i18n-ddns-ru luci-i18n-ddns-sk luci-i18n-ddns-sv luci-i18n-ddns-tr luci-i18n-ddns-uk luci-i18n-ddns-vi luci-i18n-ddns-yua luci-i18n-ddns-zh-cn luci-i18n-ddns-zh-tw
-# f2fs-tools f2fsck kmod-fs-f2fs 
+f2fs-tools f2fsck kmod-fs-f2fs
