@@ -1,0 +1,33 @@
+#!/bin/sh
+# Find the device node with the label rootfs_data
+OVERLAY_PART="$(blkid -t LABEL="rootfs_data" -o device | head -n1)"
+
+# Check if rootfs_data exists and is a real block device (not a loop device)
+if [ -b "$OVERLAY_PART" ] && ! echo "$OVERLAY_PART" | grep -q "loop"; then
+mount_root done
+rm -f /etc/uci-defaults/99-asu-defaults
+if [ ! -e /etc/overlay-expand ] \
+&& type parted > /dev/null
+then
+    # Identify the device path (e.g., /dev/mmcblk0p2)
+    OVERLAY_DEV="$(blkid -t LABEL="rootfs_data" -o device | head -n1)"
+    # Get the parent disk and partition number
+    ROOT_BLK="$(readlink -f /sys/class/block/${OVERLAY_DEV##*/})"
+    DISK_DEV="/dev/$(basename "${ROOT_BLK%/*}")"
+    PART_NUM="${ROOT_BLK##*[^0-9]}"
+    echo "${DISK_DEV}"
+    echo "${PART_NUM}"
+    printf "Yes\n" | parted "${DISK_DEV}" resizepart "${PART_NUM}" 100% ---pretend-input-tty
+    touch /etc/overlay-expand
+    #reboot
+fi
+if [ ! -e /etc/overlay-resize ] \
+&& [ -e /etc/overlay-expand ] \
+&& type resize2fs > /dev/null
+then
+    TARGET_DEV="$(blkid -t LABEL="rootfs_data" -o device | head -n1)"
+    resize2fs -f "$TARGET_DEV"
+    touch /etc/overlay-resize
+    reboot
+fi
+fi
