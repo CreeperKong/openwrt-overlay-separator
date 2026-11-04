@@ -31,6 +31,7 @@ luci-i18n-upnp-bg luci-i18n-upnp-ca luci-i18n-upnp-cs luci-i18n-upnp-de luci-i18
 
 luci-app-ddns
 luci-i18n-ddns-bg luci-i18n-ddns-ca luci-i18n-ddns-cs luci-i18n-ddns-de luci-i18n-ddns-el luci-i18n-ddns-en luci-i18n-ddns-es luci-i18n-ddns-fr luci-i18n-ddns-he luci-i18n-ddns-hi luci-i18n-ddns-hu luci-i18n-ddns-it luci-i18n-ddns-ja luci-i18n-ddns-ko luci-i18n-ddns-mr luci-i18n-ddns-ms luci-i18n-ddns-no luci-i18n-ddns-pl luci-i18n-ddns-pt luci-i18n-ddns-pt-br luci-i18n-ddns-ro luci-i18n-ddns-ru luci-i18n-ddns-sk luci-i18n-ddns-sv luci-i18n-ddns-tr luci-i18n-ddns-uk luci-i18n-ddns-vi luci-i18n-ddns-zh-cn luci-i18n-ddns-zh-tw
+ddns-scripts ddns-scripts_cloudflare.com-v4 ddns-scripts_freedns_42_pl ddns-scripts_godaddy.com-v1 ddns-scripts_no-ip_com ddns-scripts_nsupdate ddns-scripts_route53-v1
 
 luci-app-wireguard
 luci-i18n-wireguard-bg luci-i18n-wireguard-ca luci-i18n-wireguard-cs luci-i18n-wireguard-de luci-i18n-wireguard-el luci-i18n-wireguard-en luci-i18n-wireguard-es luci-i18n-wireguard-fr luci-i18n-wireguard-he luci-i18n-wireguard-hi luci-i18n-wireguard-hu luci-i18n-wireguard-it luci-i18n-wireguard-ja luci-i18n-wireguard-ko luci-i18n-wireguard-mr luci-i18n-wireguard-ms luci-i18n-wireguard-no luci-i18n-wireguard-pl luci-i18n-wireguard-pt luci-i18n-wireguard-pt-br luci-i18n-wireguard-ro luci-i18n-wireguard-ru luci-i18n-wireguard-sk luci-i18n-wireguard-sv luci-i18n-wireguard-tr luci-i18n-wireguard-uk luci-i18n-wireguard-vi luci-i18n-wireguard-zh-cn luci-i18n-wireguard-zh-tw
